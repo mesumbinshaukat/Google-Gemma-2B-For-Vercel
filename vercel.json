@@ -3,5 +3,8 @@
     "app/api/**/*.ts": {
       "maxDuration": 60
     }
+  },
+  "env": {
+    "ORT_LOGGING_LEVEL": "3"
   }
 }

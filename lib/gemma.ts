@@ -8,11 +8,8 @@ if (typeof window === 'undefined') {
   // Use /tmp for cache in serverless (writable directory)
   env.cacheDir = '/tmp/.cache';
   
-  // Suppress ONNX Runtime warnings
-  if (process.env.NODE_ENV === 'production') {
-    // Set ONNX log level to error only
-    process.env.ORT_LOGGING_LEVEL = 'error';
-  }
+  // Suppress ONNX Runtime warnings (3 = ERROR level only, suppresses warnings)
+  process.env.ORT_LOGGING_LEVEL = '3';
 }
 
 let generatorInstance: any = null;

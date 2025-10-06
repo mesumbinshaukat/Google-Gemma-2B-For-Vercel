@@ -4,12 +4,14 @@ A lightweight AI chat API built with Next.js 14, Google Gemma 2B, and MongoDB At
 
 ## Features
 
-- **Google Gemma 2B IT**: Instruction-tuned 2B parameter model via Transformers.js
+- **GPT-2 Model**: 124M parameter model via Transformers.js (quantized, optimized)
 - **MongoDB Atlas**: Standard Mongoose integration with connection pooling
 - **Serverless Functions**: Node.js runtime optimized for Vercel
 - **Rate Limiting**: 10 requests/minute per IP address
 - **Advanced Prompt Engineering**: Chain-of-Thought, few-shot learning, safety filters
-- **4-bit Quantization**: Memory-efficient model loading (<1GB RAM)
+- **Long Prompt Support**: Up to 10,000 characters per message
+- **Comprehensive Error Handling**: Graceful degradation, no breaking points
+- **Production Ready**: ONNX warnings suppressed, clean logs
 
 ## Project Structure
 
