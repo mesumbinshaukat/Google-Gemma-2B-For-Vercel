@@ -50,8 +50,17 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Parse request body
-    const body: ChatRequest = await request.json();
+    // Parse request body with error handling
+    let body: ChatRequest;
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      return NextResponse.json(
+        { error: 'Invalid JSON in request body' },
+        { status: 400, headers: rateLimitHeaders }
+      );
+    }
+    
     const { message, history = [], sessionId } = body;
 
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
@@ -61,9 +70,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (message.length > 2000) {
+    // Allow longer messages (up to 10000 chars) for detailed prompts
+    if (message.length > 10000) {
       return NextResponse.json(
-        { error: 'Message too long. Maximum 2000 characters.' },
+        { error: 'Message too long. Maximum 10000 characters.' },
         { status: 400, headers: rateLimitHeaders }
       );
     }
@@ -76,6 +86,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Limit history size to prevent memory issues
+    if (history.length > 50) {
+      return NextResponse.json(
+        { error: 'History too long. Maximum 50 messages.' },
+        { status: 400, headers: rateLimitHeaders }
+      );
+    }
+
     for (const msg of history) {
       if (!msg.role || !msg.content || !['user', 'model'].includes(msg.role)) {
         return NextResponse.json(
@@ -83,10 +101,30 @@ export async function POST(request: NextRequest) {
           { status: 400, headers: rateLimitHeaders }
         );
       }
+      
+      // Validate individual message length
+      if (typeof msg.content !== 'string' || msg.content.length > 5000) {
+        return NextResponse.json(
+          { error: 'History message content too long. Maximum 5000 characters per message.' },
+          { status: 400, headers: rateLimitHeaders }
+        );
+      }
     }
 
-    // Generate AI response
-    const aiResponse = await generateResponse(message, history);
+    // Generate AI response with timeout protection
+    let aiResponse: string;
+    try {
+      aiResponse = await generateResponse(message, history);
+    } catch (genError: any) {
+      console.error('AI generation error:', genError);
+      return NextResponse.json(
+        { 
+          error: genError.message || 'Failed to generate AI response. Please try again.',
+          details: process.env.NODE_ENV === 'development' ? genError.stack : undefined
+        },
+        { status: 500, headers: rateLimitHeaders }
+      );
+    }
 
     // Store in MongoDB
     const sessionIdToUse = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;

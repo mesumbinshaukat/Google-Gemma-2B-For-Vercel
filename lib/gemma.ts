@@ -7,6 +7,12 @@ if (typeof window === 'undefined') {
   env.allowRemoteModels = true;
   // Use /tmp for cache in serverless (writable directory)
   env.cacheDir = '/tmp/.cache';
+  
+  // Suppress ONNX Runtime warnings
+  if (process.env.NODE_ENV === 'production') {
+    // Set ONNX log level to error only
+    process.env.ORT_LOGGING_LEVEL = 'error';
+  }
 }
 
 let generatorInstance: any = null;
@@ -84,34 +90,86 @@ export async function generateResponse(
   message: string,
   history: Message[] = []
 ): Promise<string> {
-  const generator = await initializeModel();
-  
-  // Check if message needs CoT
-  const needsCoT = /\b(solve|calculate|explain|why|how|step)\b/i.test(message);
-  const processedMessage = needsCoT ? `Think step-by-step: ${message}` : message;
-  
-  const prompt = formatGemmaPrompt(history, processedMessage);
-  
   try {
+    // Validate input
+    if (!message || typeof message !== 'string') {
+      throw new Error('Invalid message: must be a non-empty string');
+    }
+
+    // Trim message but allow long prompts
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.length === 0) {
+      throw new Error('Message cannot be empty');
+    }
+
+    // Limit total prompt length to prevent memory issues
+    const MAX_PROMPT_LENGTH = 4000;
+    let truncatedHistory = history;
+    
+    // If history is too long, keep only recent messages
+    if (history.length > 10) {
+      truncatedHistory = history.slice(-10);
+    }
+
+    const generator = await initializeModel();
+    
+    // Check if message needs CoT
+    const needsCoT = /\b(solve|calculate|explain|why|how|step)\b/i.test(trimmedMessage);
+    const processedMessage = needsCoT ? `Think step-by-step: ${trimmedMessage}` : trimmedMessage;
+    
+    let prompt = formatGemmaPrompt(truncatedHistory, processedMessage);
+    
+    // Truncate prompt if too long
+    if (prompt.length > MAX_PROMPT_LENGTH) {
+      prompt = prompt.substring(prompt.length - MAX_PROMPT_LENGTH);
+    }
+    
+    // Calculate appropriate max_new_tokens based on message length
+    const baseTokens = 150;
+    const messageLength = trimmedMessage.length;
+    const maxTokens = messageLength > 500 ? 300 : messageLength > 200 ? 200 : baseTokens;
+    
     const output = await generator(prompt, {
-      max_new_tokens: 150,
+      max_new_tokens: maxTokens,
       temperature: 0.7,
       top_p: 0.9,
       do_sample: true,
-      return_full_text: false
+      return_full_text: false,
+      num_beams: 1,
+      early_stopping: false
     });
+    
+    if (!output || !Array.isArray(output) || output.length === 0) {
+      throw new Error('Model returned empty output');
+    }
     
     let response = output[0]?.generated_text || '';
     
     // Clean up response - stop at question markers
     response = response
       .split('\nQuestion:')[0]
+      .split('\nAnswer:')[0]
       .split('\n\n')[0]
       .trim();
     
-    return response || 'I apologize, but I could not generate a response.';
-  } catch (error) {
+    // Ensure we have a valid response
+    if (!response || response.length < 2) {
+      return 'I apologize, but I could not generate a meaningful response. Please try rephrasing your question.';
+    }
+    
+    return response;
+  } catch (error: any) {
     console.error('Generation error:', error);
-    throw new Error('Failed to generate response');
+    
+    // Provide specific error messages
+    if (error.message?.includes('out of memory')) {
+      throw new Error('Request too large. Please try a shorter message.');
+    } else if (error.message?.includes('timeout')) {
+      throw new Error('Request timed out. Please try again.');
+    } else if (error.message?.includes('Model')) {
+      throw new Error('Model initialization failed. Please try again in a moment.');
+    }
+    
+    throw new Error(`Failed to generate response: ${error.message || 'Unknown error'}`);
   }
 }
