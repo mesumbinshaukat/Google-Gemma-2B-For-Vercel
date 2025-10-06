@@ -16,14 +16,15 @@ let generatorInstance: any = null;
 let isInitializing = false;
 let initPromise: Promise<any> | null = null;
 
-// Few-shot examples for priming
-const FEW_SHOT_EXAMPLES = `Example 1:
-Question: Summarize: The quick brown fox jumps over the lazy dog.
-Answer: A fox jumps over a dog.
+// Few-shot examples for priming - clear and accurate
+const FEW_SHOT_EXAMPLES = `Question: What is 2+2?
+Answer: 2+2 equals 4.
 
-Example 2:
-Question: Think step-by-step: What is 15 + 27?
-Answer: Step 1: Add the ones place: 5 + 7 = 12 (write 2, carry 1). Step 2: Add the tens place: 1 + 2 + 1 = 4. Result: 42
+Question: What is the capital of France?
+Answer: The capital of France is Paris.
+
+Question: What is AI?
+Answer: AI (Artificial Intelligence) is the simulation of human intelligence by machines, enabling them to learn, reason, and solve problems.
 
 `;
 
@@ -67,8 +68,9 @@ export async function initializeModel() {
 export function formatGemmaPrompt(history: Message[], newMessage: string): string {
   let prompt = FEW_SHOT_EXAMPLES;
   
-  // Add conversation history in Q&A format
-  for (const msg of history) {
+  // Add conversation history in Q&A format (keep only last 3 for context)
+  const recentHistory = history.slice(-3);
+  for (const msg of recentHistory) {
     if (msg.role === 'user') {
       prompt += `Question: ${msg.content}\n`;
     } else {
@@ -76,9 +78,8 @@ export function formatGemmaPrompt(history: Message[], newMessage: string): strin
     }
   }
   
-  // Add new user message with safety instruction
-  const safeMessage = `${newMessage} (Respond helpfully and safely)`;
-  prompt += `Question: ${safeMessage}\nAnswer:`;
+  // Add new user message
+  prompt += `Question: ${newMessage}\nAnswer:`;
   
   return prompt;
 }
@@ -122,18 +123,18 @@ export async function generateResponse(
     }
     
     // Calculate appropriate max_new_tokens based on message length
-    const baseTokens = 150;
+    const baseTokens = 100;
     const messageLength = trimmedMessage.length;
-    const maxTokens = messageLength > 500 ? 300 : messageLength > 200 ? 200 : baseTokens;
+    const maxTokens = messageLength > 500 ? 200 : messageLength > 200 ? 150 : baseTokens;
     
     const output = await generator(prompt, {
       max_new_tokens: maxTokens,
-      temperature: 0.7,
-      top_p: 0.9,
+      temperature: 0.3,  // Lower temperature for more focused responses
+      top_p: 0.85,
+      top_k: 40,
       do_sample: true,
       return_full_text: false,
-      num_beams: 1,
-      early_stopping: false
+      repetition_penalty: 1.2  // Reduce repetition
     });
     
     if (!output || !Array.isArray(output) || output.length === 0) {
@@ -142,12 +143,21 @@ export async function generateResponse(
     
     let response = output[0]?.generated_text || '';
     
-    // Clean up response - stop at question markers
+    // Clean up response - stop at question markers or newlines
     response = response
       .split('\nQuestion:')[0]
       .split('\nAnswer:')[0]
-      .split('\n\n')[0]
+      .split('\n\nQuestion:')[0]
+      .split('\n\n\n')[0]
       .trim();
+    
+    // Remove incomplete sentences at the end
+    if (response.length > 50 && !response.match(/[.!?]$/)) {
+      const lastSentence = response.lastIndexOf('.');
+      if (lastSentence > response.length / 2) {
+        response = response.substring(0, lastSentence + 1);
+      }
+    }
     
     // Ensure we have a valid response
     if (!response || response.length < 2) {
