@@ -31,13 +31,13 @@ export async function initializeModel() {
   isInitializing = true;
   initPromise = (async () => {
     try {
-      // Using Microsoft Phi-3 Mini (3.8B params, instruction-tuned)
-      // ONNX optimized for web/edge, much better quality than GPT-2
+      // Using Flan-T5-Small (80M params, instruction-tuned)
+      // Specifically trained for Q&A and following instructions
       generatorInstance = await pipeline(
-        'text-generation',
-        'Xenova/Phi-3-mini-4k-instruct'
+        'text2text-generation',
+        'Xenova/flan-t5-small'
       );
-      console.log('Phi-3 Mini model loaded successfully');
+      console.log('Flan-T5-Small model loaded successfully');
       return generatorInstance;
     } catch (error) {
       console.error('Failed to load model:', error);
@@ -50,26 +50,28 @@ export async function initializeModel() {
   return initPromise;
 }
 
-export function formatPhi3Messages(history: Message[], newMessage: string): any[] {
-  // Phi-3 expects messages in chat format: [{role: 'user', content: '...'}, {role: 'assistant', content: '...'}]
-  const messages: any[] = [];
+export function formatT5Prompt(history: Message[], newMessage: string): string {
+  // Flan-T5 uses simple text prompts with context
+  let prompt = '';
   
-  // Add conversation history (keep only last 5 for context)
-  const recentHistory = history.slice(-5);
-  for (const msg of recentHistory) {
-    messages.push({
-      role: msg.role === 'user' ? 'user' : 'assistant',
-      content: msg.content
-    });
+  // Add conversation history (keep only last 3 for context)
+  const recentHistory = history.slice(-3);
+  if (recentHistory.length > 0) {
+    prompt += 'Context:\n';
+    for (const msg of recentHistory) {
+      if (msg.role === 'user') {
+        prompt += `Q: ${msg.content}\n`;
+      } else {
+        prompt += `A: ${msg.content}\n`;
+      }
+    }
+    prompt += '\n';
   }
   
-  // Add new user message
-  messages.push({
-    role: 'user',
-    content: newMessage
-  });
+  // Add new question
+  prompt += `Question: ${newMessage}\nAnswer:`;
   
-  return messages;
+  return prompt;
 }
 
 export async function generateResponse(
@@ -99,37 +101,27 @@ export async function generateResponse(
 
     const generator = await initializeModel();
     
-    // Format messages for Phi-3 (uses chat format, not plain text)
-    const messages = formatPhi3Messages(truncatedHistory, trimmedMessage);
+    // Format prompt for Flan-T5 (simple text format)
+    const prompt = formatT5Prompt(truncatedHistory, trimmedMessage);
     
     // Calculate appropriate max_new_tokens based on message length
     const baseTokens = 150;
     const messageLength = trimmedMessage.length;
-    const maxTokens = messageLength > 500 ? 300 : messageLength > 200 ? 200 : baseTokens;
+    const maxTokens = messageLength > 500 ? 256 : messageLength > 200 ? 200 : baseTokens;
     
-    const output = await generator(messages, {
+    const output = await generator(prompt, {
       max_new_tokens: maxTokens,
       temperature: 0.7,
       top_p: 0.9,
-      do_sample: false  // Phi-3 works better with greedy decoding
+      do_sample: true
     });
     
     if (!output || !Array.isArray(output) || output.length === 0) {
       throw new Error('Model returned empty output');
     }
     
-    // Phi-3 returns messages in format: [{generated_text: [{role, content}]}]
-    const generatedMessage = output[0]?.generated_text;
-    let response = '';
-    
-    if (Array.isArray(generatedMessage)) {
-      // Get the last assistant message
-      const lastMessage = generatedMessage[generatedMessage.length - 1];
-      response = lastMessage?.content || '';
-    } else if (typeof generatedMessage === 'string') {
-      response = generatedMessage;
-    }
-    
+    // Flan-T5 returns simple text
+    let response = output[0]?.generated_text || '';
     response = response.trim();
     
     // Ensure we have a valid response
