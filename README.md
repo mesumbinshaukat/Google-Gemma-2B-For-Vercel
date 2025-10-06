@@ -1,12 +1,12 @@
 # Gemma Chat API - AI-Powered Chat Backend
 
-A lightweight, edge-deployable AI chat API built with Next.js 14, Google Gemma 2B, and MongoDB. Optimized for Vercel's free tier with <1GB memory footprint.
+A lightweight AI chat API built with Next.js 14, Google Gemma 2B, and MongoDB Atlas. Optimized for Vercel's free tier with <1GB memory footprint.
 
 ## Features
 
 - **Google Gemma 2B IT**: Instruction-tuned 2B parameter model via Transformers.js
-- **Edge Runtime**: Fast cold starts (<5s), optimized for Vercel Edge Functions
-- **MongoDB Data API**: Edge-compatible database storage using MongoDB Atlas Data API
+- **MongoDB Atlas**: Standard Mongoose integration with connection pooling
+- **Serverless Functions**: Node.js runtime optimized for Vercel
 - **Rate Limiting**: 10 requests/minute per IP address
 - **Advanced Prompt Engineering**: Chain-of-Thought, few-shot learning, safety filters
 - **4-bit Quantization**: Memory-efficient model loading (<1GB RAM)
@@ -17,13 +17,15 @@ A lightweight, edge-deployable AI chat API built with Next.js 14, Google Gemma 2
 ├── app/
 │   ├── api/
 │   │   └── chat/
-│   │       └── route.ts          # Main API endpoint (Edge Runtime)
+│   │       └── route.ts          # Main API endpoint (Node.js serverless)
 │   ├── layout.tsx                # Root layout
 │   └── page.tsx                  # Home page
 ├── lib/
 │   ├── gemma.ts                  # Model loader & inference
-│   ├── mongodb-edge.ts           # Edge-compatible MongoDB client
+│   ├── mongodb.ts                # MongoDB connection with caching
 │   └── ratelimit.ts              # Rate limiting logic
+├── models/
+│   └── ChatSession.ts            # Mongoose schema
 ├── .env.local.example            # Environment template
 ├── vercel.json                   # Vercel configuration
 ├── next.config.js                # Next.js config
@@ -37,7 +39,7 @@ A lightweight, edge-deployable AI chat API built with Next.js 14, Google Gemma 2
 
 - Node.js 18+ 
 - npm or yarn
-- MongoDB Atlas account (optional, for database storage)
+- MongoDB Atlas account (for database storage)
 
 ### Installation
 
@@ -53,9 +55,9 @@ A lightweight, edge-deployable AI chat API built with Next.js 14, Google Gemma 2
    
    Edit `.env.local`:
    ```env
-   # MongoDB Data API (Edge-compatible) - Get from MongoDB Atlas
-   MONGODB_DATA_API_URL=https://data.mongodb-api.com/app/your-app-id/endpoint/data/v1
-   MONGODB_DATA_API_KEY=your_mongodb_data_api_key
+   # MongoDB Atlas Connection String
+   # Get from: Atlas Dashboard -> Connect -> Connect your application
+   MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/gemma-chat?retryWrites=true&w=majority
    
    # Hugging Face Token (optional for gated models)
    HF_TOKEN=your_hf_token_here
@@ -68,26 +70,27 @@ A lightweight, edge-deployable AI chat API built with Next.js 14, Google Gemma 2
    
    API available at: `http://localhost:3000/api/chat`
 
-## MongoDB Atlas Data API Setup (Recommended)
+## MongoDB Atlas Setup
 
-The Edge Runtime requires MongoDB Data API instead of traditional connection strings:
+1. **Create MongoDB Atlas cluster** at [mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas) (free M0 tier available)
 
-1. **Create MongoDB Atlas cluster** at [mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas) (free tier available)
-
-2. **Enable Data API:**
-   - Go to your Atlas project
-   - Navigate to "Data API" in the left sidebar
-   - Click "Enable Data API"
-   - Create an API key
-   - Copy the Data API URL (format: `https://data.mongodb-api.com/app/YOUR-APP-ID/endpoint/data/v1`)
+2. **Get connection string:**
+   - In Atlas dashboard, click "Connect" on your cluster
+   - Choose "Connect your application"
+   - Copy the connection string (format: `mongodb+srv://...`)
+   - Replace `<password>` with your database user password
+   - Replace `<database>` with `gemma-chat`
 
 3. **Add to environment variables:**
    ```env
-   MONGODB_DATA_API_URL=https://data.mongodb-api.com/app/YOUR-APP-ID/endpoint/data/v1
-   MONGODB_DATA_API_KEY=your_api_key_here
+   MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/gemma-chat?retryWrites=true&w=majority
    ```
 
-4. **Database will auto-create:**
+4. **Whitelist IP addresses:**
+   - In Atlas: Network Access → Add IP Address
+   - For Vercel: Add `0.0.0.0/0` (allow all) or use Vercel's IP ranges
+
+5. **Database will auto-create:**
    - Database: `gemma-chat`
    - Collection: `chatsessions`
 
@@ -112,8 +115,7 @@ The Edge Runtime requires MongoDB Data API instead of traditional connection str
 
 3. **Set environment variables in Vercel Dashboard:**
    - Go to Project Settings → Environment Variables
-   - Add `MONGODB_DATA_API_URL`
-   - Add `MONGODB_DATA_API_KEY`
+   - Add `MONGODB_URI` (your Atlas connection string)
    - Add `HF_TOKEN` (if needed)
 
 ### Alternative: Deploy Button
@@ -204,7 +206,7 @@ The API implements advanced Gemma 2B optimization techniques:
 ## Vercel Free Tier Limits
 
 - **Memory**: 1GB max (model uses ~800MB with 4-bit quantization)
-- **Execution Time**: 10s max per request (configured in `vercel.json`)
+- **Execution Time**: 60s max per request (configured in `vercel.json`)
 - **Cold Start**: ~3-5s for model initialization
 - **Bandwidth**: 100GB/month
 - **Invocations**: Unlimited (subject to fair use)
@@ -214,8 +216,8 @@ The API implements advanced Gemma 2B optimization techniques:
 - Model loads once and caches in memory (warm starts <100ms)
 - Use MongoDB Atlas free tier (512MB storage)
 - Rate limiting prevents abuse
-- Edge Runtime reduces latency globally
-- Database writes are non-blocking
+- Connection pooling for efficient database access
+- Mongoose caching prevents redundant connections
 
 ## Build & Test
 
@@ -250,33 +252,30 @@ Error: Failed to load Gemma model
 
 ### MongoDB Connection Failed
 ```
-Error: MongoDB Data API error
+Error: connect ECONNREFUSED / MongoServerError
 ```
 **Solution**: 
-- Verify `MONGODB_DATA_API_URL` and `MONGODB_DATA_API_KEY` are correct
-- Ensure Data API is enabled in MongoDB Atlas
-- Check API key has read/write permissions
-- If not configured, API will still work but won't save chat history
+- Verify `MONGODB_URI` connection string is correct
+- Check database user credentials (username/password)
+- Ensure IP address is whitelisted in Atlas Network Access (use `0.0.0.0/0` for Vercel)
+- Verify cluster is running and accessible
+- Check if database name is specified in connection string
 
 ### Rate Limit Not Working
 **Solution**: Rate limiting uses in-memory storage; resets on deployment. For persistent limits across instances, integrate Redis (e.g., Upstash).
 
 ### Vercel Deployment Timeout
-**Solution**: Model initialization may exceed 10s on cold start. Consider:
-- Using Vercel Pro (60s timeout)
-- Pre-warming functions with scheduled CRON
-- Model caches after first load
-
-### Edge Runtime Compatibility
-**Error**: Module not compatible with Edge Runtime
-**Solution**: Edge Runtime doesn't support Node.js-specific modules like `fs`, `mongoose`, etc. Use fetch-based APIs (like MongoDB Data API) instead.
+**Solution**: Model initialization may take time on cold start. Current config allows 60s timeout.
+- Model caches after first successful load
+- Subsequent requests are much faster (<100ms)
+- Consider pre-warming with scheduled requests
 
 ## Tech Stack
 
-- **Framework**: Next.js 14.2.33 (App Router, Edge Runtime)
+- **Framework**: Next.js 14.2.33 (App Router, Node.js Runtime)
 - **AI Model**: Google Gemma 2B IT via @xenova/transformers 2.17.2
-- **Database**: MongoDB Atlas Data API (Edge-compatible)
-- **Deployment**: Vercel Edge Functions
+- **Database**: MongoDB Atlas with Mongoose 8.x
+- **Deployment**: Vercel Serverless Functions
 - **Language**: TypeScript 5.x
 
 ## Performance Metrics
