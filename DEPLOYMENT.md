@@ -7,51 +7,53 @@ All dependencies installed successfully. Build completed with no errors.
 ## 📦 What's Included
 
 ### Core Files
-- ✅ `app/api/chat/route.ts` - Edge Runtime API endpoint with Gemma 2B integration
+- ✅ `app/api/chat/route.ts` - Serverless API endpoint with Gemma 2B integration
 - ✅ `lib/gemma.ts` - Model loader with prompt engineering (CoT, few-shot, safety)
-- ✅ `lib/mongodb-edge.ts` - Edge-compatible MongoDB Data API client
+- ✅ `lib/mongodb.ts` - MongoDB Atlas connection with Mongoose
+- ✅ `models/ChatSession.ts` - Mongoose schema for chat sessions
 - ✅ `lib/ratelimit.ts` - In-memory rate limiting (10 req/min per IP)
 - ✅ `app/layout.tsx` & `app/page.tsx` - Next.js app structure
-- ✅ `package.json` - All dependencies (Next.js 14.2.33, @xenova/transformers 2.17.2)
-- ✅ `vercel.json` - Edge Runtime configuration
+- ✅ `package.json` - All dependencies (Next.js 14.2.33, mongoose 8.8.4)
+- ✅ `vercel.json` - Serverless configuration (60s timeout)
 - ✅ `README.md` - Complete documentation
 
 ### Configuration
 - ✅ TypeScript configured
 - ✅ Next.js 14 App Router
-- ✅ Edge Runtime enabled
+- ✅ Node.js Serverless Runtime
 - ✅ No security vulnerabilities
 - ✅ Build successful
 
 ## 🚀 Deploy to Vercel (3 Steps)
 
-### 1. Set Environment Variables
+### 1. Get MongoDB Atlas Connection String
+
+1. Go to [mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas)
+2. Create free cluster (M0) if you don't have one
+3. Click **"Connect"** → **"Connect your application"**
+4. Copy the connection string:
+   ```
+   mongodb+srv://username:password@cluster.mongodb.net/gemma-chat?retryWrites=true&w=majority
+   ```
+5. Replace `<password>` with your actual password
+6. Replace `<database>` with `gemma-chat`
+
+### 2. Test Locally
 
 Create `.env.local` file:
 ```bash
 cp .env.local.example .env.local
 ```
 
-**For local development (optional MongoDB):**
+Add your MongoDB connection string:
 ```env
-# Leave empty to run without database (chat history won't persist)
-MONGODB_DATA_API_URL=
-MONGODB_DATA_API_KEY=
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/gemma-chat?retryWrites=true&w=majority
 ```
 
-**For production with MongoDB Atlas:**
-```env
-MONGODB_DATA_API_URL=https://data.mongodb-api.com/app/YOUR-APP-ID/endpoint/data/v1
-MONGODB_DATA_API_KEY=your_api_key_here
-```
-
-### 2. Test Locally
-
+Run dev server:
 ```bash
 npm run dev
 ```
-
-Visit: `http://localhost:3000`
 
 Test API:
 ```bash
@@ -60,7 +62,35 @@ curl -X POST http://localhost:3000/api/chat \
   -d '{"message": "Hello, explain AI in one sentence"}'
 ```
 
-### 3. Deploy to Vercel
+### 3. Deploy to Vercel via Dashboard
+
+1. **Push to GitHub** (already done ✅)
+
+2. **Go to [vercel.com](https://vercel.com)** and sign in
+
+3. **Click "Add New Project"** → Select your GitHub repo
+
+4. **Configure Project Settings:**
+
+   | Setting | What to Select |
+   |---------|----------------|
+   | **Root Directory** | `.` (leave as default - the root folder) |
+   | **Build Command** | `npm run build` (auto-detected, leave as is) |
+   | **Output Directory** | `.next` (auto-detected, leave as is) |
+   | **Install Command** | `npm install` (auto-detected, leave as is) |
+
+5. **Add Environment Variables** (IMPORTANT):
+   
+   Click **"Environment Variables"** and add:
+   
+   | Key | Value |
+   |-----|-------|
+   | `MONGODB_URI` | `mongodb+srv://username:password@cluster.mongodb.net/gemma-chat?retryWrites=true&w=majority` |
+   | `HF_TOKEN` | `your_huggingface_token` (optional) |
+
+6. **Click "Deploy"** 🚀
+
+### Alternative: Deploy via CLI
 
 ```bash
 # Install Vercel CLI
@@ -70,22 +100,11 @@ npm i -g vercel
 vercel --prod
 ```
 
-Or push to GitHub and import in Vercel Dashboard.
-
-## 🔧 MongoDB Atlas Setup (Optional)
-
-If you want to persist chat history:
-
-1. Go to [mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas)
-2. Create free cluster (M0)
-3. Enable Data API:
-   - Left sidebar → "Data API"
-   - Click "Enable Data API"
-   - Create API key
-   - Copy URL: `https://data.mongodb-api.com/app/YOUR-APP-ID/endpoint/data/v1`
-4. Add to Vercel environment variables:
-   - `MONGODB_DATA_API_URL`
-   - `MONGODB_DATA_API_KEY`
+When prompted, set environment variables:
+```bash
+vercel env add MONGODB_URI
+# Paste your connection string
+```
 
 ## 📊 Build Output
 
@@ -96,8 +115,19 @@ Route (app)                              Size     First Load JS
 └ ƒ /api/chat                            0 B                0 B
 
 ○  (Static)   prerendered as static content
-ƒ  (Dynamic)  server-rendered on demand (Edge Runtime)
+ƒ  (Dynamic)  server-rendered on demand (Node.js Serverless)
 ```
+
+## 🔧 Important: MongoDB Atlas Network Access
+
+**Before deploying**, whitelist Vercel's IP addresses in MongoDB Atlas:
+
+1. Go to Atlas Dashboard → **Network Access**
+2. Click **"Add IP Address"**
+3. Add: `0.0.0.0/0` (allows all IPs - easiest for Vercel)
+4. Or use specific Vercel IP ranges (more secure)
+
+Without this, your API will fail with connection errors!
 
 ## ✨ Key Features Implemented
 
@@ -109,17 +139,17 @@ Route (app)                              Size     First Load JS
 - ✅ Optimized generation params (temp=0.7, top_p=0.9, max_tokens=512)
 - ✅ Output parsing (stops at `</s>`, `<end_of_turn>`)
 
-### Edge Runtime Optimizations
+### Serverless Optimizations
 - ✅ 4-bit quantized model (~800MB)
 - ✅ Model caching (warm starts <100ms)
-- ✅ Non-blocking database writes
+- ✅ MongoDB connection pooling
 - ✅ Rate limiting (10 req/min per IP)
 - ✅ Input validation (max 2000 chars)
 
 ### API Features
 - ✅ POST `/api/chat` - Send messages with history
 - ✅ GET `/api/chat` - Health check
-- ✅ Session management
+- ✅ Session management with MongoDB
 - ✅ Error handling with proper HTTP codes
 - ✅ Rate limit headers
 
@@ -150,15 +180,15 @@ curl -X POST http://localhost:3000/api/chat \
 2. **Cold Starts**: 3-5 seconds after deployment
 3. **Warm Starts**: <100ms after model is cached
 4. **Memory Usage**: ~850MB (fits in Vercel free tier 1GB limit)
-5. **Timeout**: 10s max per request (Edge Runtime limit)
-6. **Database**: Optional - API works without MongoDB
+5. **Timeout**: 60s max per request (configured in vercel.json)
+6. **Database**: MongoDB Atlas required for chat history persistence
 
 ## 🐛 Known Limitations
 
-- Edge Runtime warning during build (expected, static generation disabled for `/api/chat`)
 - First request timeout possible (model download) - retry after 60s
 - Rate limiting resets on deployment (use Redis for persistent limits)
 - No streaming responses (add in future version)
+- Model size ~1.5GB (downloads on first request)
 
 ## 📚 Documentation
 
