@@ -1,0 +1,12 @@
+{
+  "functions": {
+    "app/api/**/*.ts": {
+      "runtime": "edge",
+      "maxDuration": 10
+    }
+  },
+  "env": {
+    "MONGODB_URI": "@mongodb-uri",
+    "HF_TOKEN": "@hf-token"
+  }
+}
