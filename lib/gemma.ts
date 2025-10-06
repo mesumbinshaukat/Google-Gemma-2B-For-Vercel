@@ -16,18 +16,6 @@ let generatorInstance: any = null;
 let isInitializing = false;
 let initPromise: Promise<any> | null = null;
 
-// Few-shot examples for priming - clear and accurate
-const FEW_SHOT_EXAMPLES = `Question: What is 2+2?
-Answer: 2+2 equals 4.
-
-Question: What is the capital of France?
-Answer: The capital of France is Paris.
-
-Question: What is AI?
-Answer: AI (Artificial Intelligence) is the simulation of human intelligence by machines, enabling them to learn, reason, and solve problems.
-
-`;
-
 interface Message {
   role: 'user' | 'model';
   content: string;
@@ -62,23 +50,26 @@ export async function initializeModel() {
   return initPromise;
 }
 
-export function formatGemmaPrompt(history: Message[], newMessage: string): string {
-  let prompt = FEW_SHOT_EXAMPLES;
+export function formatPhi3Messages(history: Message[], newMessage: string): any[] {
+  // Phi-3 expects messages in chat format: [{role: 'user', content: '...'}, {role: 'assistant', content: '...'}]
+  const messages: any[] = [];
   
-  // Add conversation history in Q&A format (keep only last 3 for context)
-  const recentHistory = history.slice(-3);
+  // Add conversation history (keep only last 5 for context)
+  const recentHistory = history.slice(-5);
   for (const msg of recentHistory) {
-    if (msg.role === 'user') {
-      prompt += `Question: ${msg.content}\n`;
-    } else {
-      prompt += `Answer: ${msg.content}\n\n`;
-    }
+    messages.push({
+      role: msg.role === 'user' ? 'user' : 'assistant',
+      content: msg.content
+    });
   }
   
   // Add new user message
-  prompt += `Question: ${newMessage}\nAnswer:`;
+  messages.push({
+    role: 'user',
+    content: newMessage
+  });
   
-  return prompt;
+  return messages;
 }
 
 export async function generateResponse(
@@ -108,53 +99,38 @@ export async function generateResponse(
 
     const generator = await initializeModel();
     
-    // Check if message needs CoT
-    const needsCoT = /\b(solve|calculate|explain|why|how|step)\b/i.test(trimmedMessage);
-    const processedMessage = needsCoT ? `Think step-by-step: ${trimmedMessage}` : trimmedMessage;
-    
-    let prompt = formatGemmaPrompt(truncatedHistory, processedMessage);
-    
-    // Truncate prompt if too long
-    if (prompt.length > MAX_PROMPT_LENGTH) {
-      prompt = prompt.substring(prompt.length - MAX_PROMPT_LENGTH);
-    }
+    // Format messages for Phi-3 (uses chat format, not plain text)
+    const messages = formatPhi3Messages(truncatedHistory, trimmedMessage);
     
     // Calculate appropriate max_new_tokens based on message length
-    const baseTokens = 100;
+    const baseTokens = 150;
     const messageLength = trimmedMessage.length;
-    const maxTokens = messageLength > 500 ? 200 : messageLength > 200 ? 150 : baseTokens;
+    const maxTokens = messageLength > 500 ? 300 : messageLength > 200 ? 200 : baseTokens;
     
-    const output = await generator(prompt, {
+    const output = await generator(messages, {
       max_new_tokens: maxTokens,
-      temperature: 0.3,  // Lower temperature for more focused responses
-      top_p: 0.85,
-      top_k: 40,
-      do_sample: true,
-      return_full_text: false,
-      repetition_penalty: 1.2  // Reduce repetition
+      temperature: 0.7,
+      top_p: 0.9,
+      do_sample: false  // Phi-3 works better with greedy decoding
     });
     
     if (!output || !Array.isArray(output) || output.length === 0) {
       throw new Error('Model returned empty output');
     }
     
-    let response = output[0]?.generated_text || '';
+    // Phi-3 returns messages in format: [{generated_text: [{role, content}]}]
+    const generatedMessage = output[0]?.generated_text;
+    let response = '';
     
-    // Clean up response - stop at question markers or newlines
-    response = response
-      .split('\nQuestion:')[0]
-      .split('\nAnswer:')[0]
-      .split('\n\nQuestion:')[0]
-      .split('\n\n\n')[0]
-      .trim();
-    
-    // Remove incomplete sentences at the end
-    if (response.length > 50 && !response.match(/[.!?]$/)) {
-      const lastSentence = response.lastIndexOf('.');
-      if (lastSentence > response.length / 2) {
-        response = response.substring(0, lastSentence + 1);
-      }
+    if (Array.isArray(generatedMessage)) {
+      // Get the last assistant message
+      const lastMessage = generatedMessage[generatedMessage.length - 1];
+      response = lastMessage?.content || '';
+    } else if (typeof generatedMessage === 'string') {
+      response = generatedMessage;
     }
+    
+    response = response.trim();
     
     // Ensure we have a valid response
     if (!response || response.length < 2) {
