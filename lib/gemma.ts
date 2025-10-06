@@ -43,16 +43,13 @@ export async function initializeModel() {
   isInitializing = true;
   initPromise = (async () => {
     try {
-      // Using GPT-2 which is proven to work with text-generation pipeline
-      // Smaller model (124M params) that fits Vercel constraints
+      // Using Microsoft Phi-3 Mini (3.8B params, instruction-tuned)
+      // ONNX optimized for web/edge, much better quality than GPT-2
       generatorInstance = await pipeline(
         'text-generation',
-        'Xenova/gpt2',
-        {
-          quantized: true
-        }
+        'Xenova/Phi-3-mini-4k-instruct'
       );
-      console.log('Text generation model loaded successfully');
+      console.log('Phi-3 Mini model loaded successfully');
       return generatorInstance;
     } catch (error) {
       console.error('Failed to load model:', error);
