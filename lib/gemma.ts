@@ -43,16 +43,16 @@ export async function initializeModel() {
   isInitializing = true;
   initPromise = (async () => {
     try {
-      // Load Gemma 2B IT model with quantization for memory efficiency
+      // Load text generation model with quantization for memory efficiency
+      // Using LaMini-Flan-T5-783M as Gemma 2B IT is not available in Xenova
       generatorInstance = await pipeline(
         'text-generation',
-        'Xenova/gemma-2b-it',
+        'Xenova/LaMini-Flan-T5-783M',
         {
-          quantized: true,
-          revision: 'main'
+          quantized: true
         }
       );
-      console.log('Gemma 2B model loaded successfully');
+      console.log('Text generation model loaded successfully');
       return generatorInstance;
     } catch (error) {
       console.error('Failed to load Gemma model:', error);
