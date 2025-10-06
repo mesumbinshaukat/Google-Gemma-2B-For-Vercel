@@ -3,9 +3,5 @@
     "app/api/**/*.ts": {
       "maxDuration": 60
     }
-  },
-  "env": {
-    "MONGODB_URI": "@mongodb-uri",
-    "HF_TOKEN": "@hf-token"
   }
 }
