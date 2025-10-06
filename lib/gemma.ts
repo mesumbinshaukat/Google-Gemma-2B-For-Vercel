@@ -1,10 +1,12 @@
 import { pipeline, env } from '@xenova/transformers';
 
-// Configure for serverless environment
+// Configure for serverless environment (Vercel)
 if (typeof window === 'undefined') {
   env.allowLocalModels = false;
   env.useBrowserCache = false;
   env.allowRemoteModels = true;
+  // Use /tmp for cache in serverless (writable directory)
+  env.cacheDir = '/tmp/.cache';
 }
 
 let generatorInstance: any = null;
@@ -13,18 +15,12 @@ let initPromise: Promise<any> | null = null;
 
 // Few-shot examples for priming
 const FEW_SHOT_EXAMPLES = `Example 1:
-<start_of_turn>user
-Summarize: The quick brown fox jumps over the lazy dog.<end_of_turn>
-<start_of_turn>model
-A fox jumps over a dog.<end_of_turn>
+Question: Summarize: The quick brown fox jumps over the lazy dog.
+Answer: A fox jumps over a dog.
 
 Example 2:
-<start_of_turn>user
-Think step-by-step: What is 15 + 27?<end_of_turn>
-<start_of_turn>model
-Step 1: Add the ones place: 5 + 7 = 12 (write 2, carry 1)
-Step 2: Add the tens place: 1 + 2 + 1 = 4
-Result: 42<end_of_turn>
+Question: Think step-by-step: What is 15 + 27?
+Answer: Step 1: Add the ones place: 5 + 7 = 12 (write 2, carry 1). Step 2: Add the tens place: 1 + 2 + 1 = 4. Result: 42
 
 `;
 
@@ -43,11 +39,11 @@ export async function initializeModel() {
   isInitializing = true;
   initPromise = (async () => {
     try {
-      // Load text generation model with quantization for memory efficiency
-      // Using LaMini-Flan-T5-783M as Gemma 2B IT is not available in Xenova
+      // Using GPT-2 which is proven to work with text-generation pipeline
+      // Smaller model (124M params) that fits Vercel constraints
       generatorInstance = await pipeline(
         'text-generation',
-        'Xenova/LaMini-Flan-T5-783M',
+        'Xenova/gpt2',
         {
           quantized: true
         }
@@ -55,7 +51,7 @@ export async function initializeModel() {
       console.log('Text generation model loaded successfully');
       return generatorInstance;
     } catch (error) {
-      console.error('Failed to load Gemma model:', error);
+      console.error('Failed to load model:', error);
       isInitializing = false;
       initPromise = null;
       throw error;
@@ -68,14 +64,18 @@ export async function initializeModel() {
 export function formatGemmaPrompt(history: Message[], newMessage: string): string {
   let prompt = FEW_SHOT_EXAMPLES;
   
-  // Add conversation history
+  // Add conversation history in Q&A format
   for (const msg of history) {
-    prompt += `<start_of_turn>${msg.role}\n${msg.content}<end_of_turn>\n`;
+    if (msg.role === 'user') {
+      prompt += `Question: ${msg.content}\n`;
+    } else {
+      prompt += `Answer: ${msg.content}\n\n`;
+    }
   }
   
   // Add new user message with safety instruction
-  const safeMessage = `${newMessage}\nRespond helpfully and safely, avoiding harm.`;
-  prompt += `<start_of_turn>user\n${safeMessage}<end_of_turn>\n<start_of_turn>model\n`;
+  const safeMessage = `${newMessage} (Respond helpfully and safely)`;
+  prompt += `Question: ${safeMessage}\nAnswer:`;
   
   return prompt;
 }
@@ -94,20 +94,19 @@ export async function generateResponse(
   
   try {
     const output = await generator(prompt, {
-      max_new_tokens: 512,
+      max_new_tokens: 150,
       temperature: 0.7,
       top_p: 0.9,
       do_sample: true,
-      return_full_text: false,
-      stop_strings: ['</s>', '<end_of_turn>']
+      return_full_text: false
     });
     
     let response = output[0]?.generated_text || '';
     
-    // Clean up response
+    // Clean up response - stop at question markers
     response = response
-      .split('</s>')[0]
-      .split('<end_of_turn>')[0]
+      .split('\nQuestion:')[0]
+      .split('\n\n')[0]
       .trim();
     
     return response || 'I apologize, but I could not generate a response.';
