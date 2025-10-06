@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateResponse } from '@/lib/gemma';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/ratelimit';
-import { saveToMongoDB } from '@/lib/mongodb-edge';
+import { connectDB } from '@/lib/mongodb';
+import ChatSession from '@/models/ChatSession';
 
-export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 interface Message {
@@ -88,13 +88,39 @@ export async function POST(request: NextRequest) {
     // Generate AI response
     const aiResponse = await generateResponse(message, history);
 
-    // Store in MongoDB (non-blocking)
+    // Store in MongoDB
     const sessionIdToUse = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
-    // Save to MongoDB asynchronously (don't await to avoid blocking)
-    saveToMongoDB(sessionIdToUse, message, aiResponse).catch(err => {
-      console.error('MongoDB save error:', err);
-    });
+    try {
+      await connectDB();
+      
+      const userMessage = {
+        role: 'user' as const,
+        content: message,
+        timestamp: new Date()
+      };
+
+      const modelMessage = {
+        role: 'model' as const,
+        content: aiResponse,
+        timestamp: new Date()
+      };
+
+      await ChatSession.findOneAndUpdate(
+        { sessionId: sessionIdToUse },
+        {
+          $push: {
+            messages: {
+              $each: [userMessage, modelMessage]
+            }
+          }
+        },
+        { upsert: true, new: true }
+      );
+    } catch (dbError) {
+      console.error('MongoDB error:', dbError);
+      // Continue even if DB fails
+    }
 
     return NextResponse.json(
       {

@@ -1,8 +1,7 @@
 {
   "functions": {
     "app/api/**/*.ts": {
-      "runtime": "edge",
-      "maxDuration": 10
+      "maxDuration": 60
     }
   },
   "env": {

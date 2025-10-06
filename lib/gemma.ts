@@ -1,8 +1,11 @@
 import { pipeline, env } from '@xenova/transformers';
 
-// Disable local model caching for edge runtime
-env.allowLocalModels = false;
-env.useBrowserCache = true;
+// Configure for serverless environment
+if (typeof window === 'undefined') {
+  env.allowLocalModels = false;
+  env.useBrowserCache = false;
+  env.allowRemoteModels = true;
+}
 
 let generatorInstance: any = null;
 let isInitializing = false;
