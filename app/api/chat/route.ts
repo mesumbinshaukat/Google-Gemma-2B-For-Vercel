@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
     try {
       body = await request.json();
     } catch (parseError) {
+      console.error(`[${new Date().toISOString()}] ❌ Invalid JSON in request`);
       return NextResponse.json(
         { error: 'Invalid JSON in request body' },
         { status: 400, headers: rateLimitHeaders }
@@ -62,6 +63,7 @@ export async function POST(request: NextRequest) {
     }
     
     const { message, history = [], sessionId } = body;
+    console.log(`[${new Date().toISOString()}] 📨 New request - Message: "${message.substring(0, 50)}..." - Session: ${sessionId || 'new'}`);
 
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
       return NextResponse.json(
@@ -114,9 +116,13 @@ export async function POST(request: NextRequest) {
     // Generate AI response with timeout protection
     let aiResponse: string;
     try {
+      console.log(`[${new Date().toISOString()}] 🤖 Generating AI response...`);
+      const startTime = Date.now();
       aiResponse = await generateResponse(message, history);
+      const duration = Date.now() - startTime;
+      console.log(`[${new Date().toISOString()}] ✓ AI response generated in ${duration}ms - Length: ${aiResponse.length} chars`);
     } catch (genError: any) {
-      console.error('AI generation error:', genError);
+      console.error(`[${new Date().toISOString()}] ❌ AI generation error:`, genError);
       return NextResponse.json(
         { 
           error: genError.message || 'Failed to generate AI response. Please try again.',
@@ -130,6 +136,7 @@ export async function POST(request: NextRequest) {
     const sessionIdToUse = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     try {
+      console.log(`[${new Date().toISOString()}] Saving to MongoDB - Session: ${sessionIdToUse}`);
       await connectDB();
       
       const userMessage = {
@@ -144,7 +151,7 @@ export async function POST(request: NextRequest) {
         timestamp: new Date()
       };
 
-      await ChatSession.findOneAndUpdate(
+      const savedSession = await ChatSession.findOneAndUpdate(
         { sessionId: sessionIdToUse },
         {
           $push: {
@@ -155,8 +162,10 @@ export async function POST(request: NextRequest) {
         },
         { upsert: true, new: true }
       );
+      
+      console.log(`[${new Date().toISOString()}] ✓ Saved to MongoDB - Total messages: ${savedSession.messages.length}`);
     } catch (dbError) {
-      console.error('MongoDB error:', dbError);
+      console.error(`[${new Date().toISOString()}] ❌ MongoDB error:`, dbError);
       // Continue even if DB fails
     }
 
