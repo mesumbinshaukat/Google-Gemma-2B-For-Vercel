@@ -51,25 +51,9 @@ export async function initializeModel() {
 }
 
 export function formatT5Prompt(history: Message[], newMessage: string): string {
-  // Flan-T5 uses simple text prompts with context
-  let prompt = '';
-  
-  // Add conversation history (keep only last 3 for context)
-  const recentHistory = history.slice(-3);
-  if (recentHistory.length > 0) {
-    prompt += 'Context:\n';
-    for (const msg of recentHistory) {
-      if (msg.role === 'user') {
-        prompt += `Q: ${msg.content}\n`;
-      } else {
-        prompt += `A: ${msg.content}\n`;
-      }
-    }
-    prompt += '\n';
-  }
-  
-  // Add new question
-  prompt += `Question: ${newMessage}\nAnswer:`;
+  // Flan-T5 works best with direct questions
+  // Just pass the question directly, optionally with context
+  let prompt = newMessage;
   
   return prompt;
 }
