@@ -1,20 +1,6 @@
-import { pipeline, env } from '@xenova/transformers';
-
-// Configure for serverless environment (Vercel)
-if (typeof window === 'undefined') {
-  env.allowLocalModels = false;
-  env.useBrowserCache = false;
-  env.allowRemoteModels = true;
-  // Use /tmp for cache in serverless (writable directory)
-  env.cacheDir = '/tmp/.cache';
-  
-  // Suppress ONNX Runtime warnings (3 = ERROR level only, suppresses warnings)
-  process.env.ORT_LOGGING_LEVEL = '3';
-}
-
-let generatorInstance: any = null;
-let isInitializing = false;
-let initPromise: Promise<any> | null = null;
+// Local development with Ollama + Phi-3 Mini
+const OLLAMA_API_URL = process.env.OLLAMA_API_URL || 'http://localhost:11434';
+const MODEL_NAME = 'phi3';
 
 interface Message {
   role: 'user' | 'model';
@@ -22,40 +8,40 @@ interface Message {
 }
 
 export async function initializeModel() {
-  if (generatorInstance) return generatorInstance;
-  
-  if (isInitializing) {
-    return initPromise;
-  }
-
-  isInitializing = true;
-  initPromise = (async () => {
-    try {
-      // Using Flan-T5-Small (80M params, instruction-tuned)
-      // Specifically trained for Q&A and following instructions
-      generatorInstance = await pipeline(
-        'text2text-generation',
-        'Xenova/flan-t5-small'
-      );
-      console.log('Flan-T5-Small model loaded successfully');
-      return generatorInstance;
-    } catch (error) {
-      console.error('Failed to load model:', error);
-      isInitializing = false;
-      initPromise = null;
-      throw error;
+  // For Ollama, we don't need to initialize - just check if it's running
+  try {
+    const response = await fetch(`${OLLAMA_API_URL}/api/tags`);
+    if (!response.ok) {
+      throw new Error('Ollama is not running. Please start Ollama first.');
     }
-  })();
-
-  return initPromise;
+    console.log('Ollama connection verified');
+    return true;
+  } catch (error) {
+    console.error('Failed to connect to Ollama:', error);
+    throw new Error('Ollama is not running. Please install and start Ollama, then run: ollama pull phi3');
+  }
 }
 
-export function formatT5Prompt(history: Message[], newMessage: string): string {
-  // Flan-T5 works best with direct questions
-  // Just pass the question directly, optionally with context
-  let prompt = newMessage;
+export function formatPhi3Messages(history: Message[], newMessage: string): any[] {
+  // Phi-3 chat format for Ollama
+  const messages: any[] = [];
   
-  return prompt;
+  // Add conversation history (keep only last 5 for context)
+  const recentHistory = history.slice(-5);
+  for (const msg of recentHistory) {
+    messages.push({
+      role: msg.role === 'user' ? 'user' : 'assistant',
+      content: msg.content
+    });
+  }
+  
+  // Add new user message
+  messages.push({
+    role: 'user',
+    content: newMessage
+  });
+  
+  return messages;
 }
 
 export async function generateResponse(
@@ -75,7 +61,6 @@ export async function generateResponse(
     }
 
     // Limit total prompt length to prevent memory issues
-    const MAX_PROMPT_LENGTH = 4000;
     let truncatedHistory = history;
     
     // If history is too long, keep only recent messages
@@ -83,47 +68,51 @@ export async function generateResponse(
       truncatedHistory = history.slice(-10);
     }
 
-    const generator = await initializeModel();
+    // Check Ollama connection
+    await initializeModel();
     
-    // Format prompt for Flan-T5 (simple text format)
-    const prompt = formatT5Prompt(truncatedHistory, trimmedMessage);
+    // Format messages for Phi-3
+    const messages = formatPhi3Messages(truncatedHistory, trimmedMessage);
     
-    // Calculate appropriate max_new_tokens based on message length
-    const baseTokens = 150;
-    const messageLength = trimmedMessage.length;
-    const maxTokens = messageLength > 500 ? 256 : messageLength > 200 ? 200 : baseTokens;
-    
-    const output = await generator(prompt, {
-      max_new_tokens: maxTokens,
-      temperature: 0.7,
-      top_p: 0.9,
-      do_sample: true
+    // Call Ollama API
+    const response = await fetch(`${OLLAMA_API_URL}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: MODEL_NAME,
+        messages: messages,
+        stream: false,
+        options: {
+          temperature: 0.7,
+          top_p: 0.9,
+          num_predict: 512
+        }
+      }),
     });
-    
-    if (!output || !Array.isArray(output) || output.length === 0) {
-      throw new Error('Model returned empty output');
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Ollama API error: ${response.status} - ${errorText}`);
     }
+
+    const data = await response.json();
+    const aiResponse = data.message?.content || '';
     
-    // Flan-T5 returns simple text
-    let response = output[0]?.generated_text || '';
-    response = response.trim();
-    
-    // Ensure we have a valid response
-    if (!response || response.length < 2) {
+    if (!aiResponse || aiResponse.length < 2) {
       return 'I apologize, but I could not generate a meaningful response. Please try rephrasing your question.';
     }
     
-    return response;
+    return aiResponse.trim();
   } catch (error: any) {
     console.error('Generation error:', error);
     
     // Provide specific error messages
-    if (error.message?.includes('out of memory')) {
-      throw new Error('Request too large. Please try a shorter message.');
-    } else if (error.message?.includes('timeout')) {
-      throw new Error('Request timed out. Please try again.');
-    } else if (error.message?.includes('Model')) {
-      throw new Error('Model initialization failed. Please try again in a moment.');
+    if (error.message?.includes('Ollama')) {
+      throw error; // Re-throw Ollama-specific errors
+    } else if (error.message?.includes('fetch')) {
+      throw new Error('Could not connect to Ollama. Make sure Ollama is running on http://localhost:11434');
     }
     
     throw new Error(`Failed to generate response: ${error.message || 'Unknown error'}`);
